@@ -19,7 +19,7 @@ type RedisInstance struct {
 	Connection redis.Client
 }
 
-type App struct {
+type RedisCloudWatchMonitor struct {
 	Instances  []*RedisInstance
 	TotalCount int
 }
@@ -40,13 +40,9 @@ var (
 	redis_password         = kingpin.Flag("redis-password", "password for redis instance").Short('P').String()
 	aws_credential_file    = kingpin.Flag("aws-credential-file", "aws credential file, can be used in place of ENV variables or IAM profile").Short('f').String()
 	aws_credential_profile = kingpin.Flag("aws-credential-profile", "aws credential profile").Short('p').String()
-
-	Password    string
-	get_version = kingpin.Flag("version", "get version").Short('V').Bool()
-
-	RedisCloudWatch = &App{}
-	auth            *aws.Config
-	cred            *credentials.Credentials
+	get_version            = kingpin.Flag("version", "get version").Short('V').Bool()
+	auth                   *aws.Config
+	cred                   *credentials.Credentials
 )
 
 func init() {
@@ -57,8 +53,7 @@ func init() {
 		os.Exit(0)
 	}
 
-	RedisCloudWatch.TotalCount = 0
-
+	// RedisPassword
 	cred = credentials.NewChainCredentials(
 		[]credentials.Provider{
 			&credentials.EnvProvider{},
@@ -82,6 +77,44 @@ func init() {
 
 func main() {
 	logrus.Debug("Starting application")
+
+	app := &RedisCloudWatchMonitor{
+		TotalCount: 0,
+	}
+
+	app.Instances = GetRedisWatcherInstances()
+
+	GetTotalRedisSetLength(app)
+
+	logrus.WithFields(logrus.Fields{
+		"redis_total": app.TotalCount,
+	}).Info("counters")
+
+	if *to_cloudwatch {
+		SendCloudWatchMetric(float64(app.TotalCount))
+	}
+
+	logrus.Debug("Done")
+}
+
+// Iterate over each redis instance and sum the set size for cloud watch
+func GetTotalRedisSetLength(ri *RedisCloudWatchMonitor) {
+
+	for _, r := range ri.Instances {
+		logrus.Debugf("Looking queue length from %s", r.Name)
+		ls_length, err := r.Connection.Llen(*redis_list_name)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		logrus.Debugf("length of set '%s' was %d on '%s'", *redis_list_name, ls_length, r.Name)
+		ri.TotalCount = ri.TotalCount + ls_length
+	}
+}
+
+// Initilize our structs with passed in redis URL's
+func GetRedisWatcherInstances() []*RedisInstance {
+	var instances []*RedisInstance
+
 	for _, v := range *redis_servers {
 		redis_instance := &RedisInstance{
 			Name: v,
@@ -95,28 +128,9 @@ func main() {
 			redis_instance.Connection.Password = *redis_password
 		}
 
-		RedisCloudWatch.Instances = append(RedisCloudWatch.Instances, redis_instance)
+		instances = append(instances, redis_instance)
 	}
-
-	for _, r := range RedisCloudWatch.Instances {
-		logrus.Debugf("Looking queue length from %s", r.Name)
-		ls_length, err := r.Connection.Llen(*redis_list_name)
-		if err != nil {
-			logrus.Fatal(err)
-		}
-
-		RedisCloudWatch.TotalCount = RedisCloudWatch.TotalCount + ls_length
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"redis_total": RedisCloudWatch.TotalCount,
-	}).Info("counters")
-
-	if *to_cloudwatch {
-		SendCloudWatchMetric(float64(RedisCloudWatch.TotalCount))
-	}
-
-	logrus.Debug("Done")
+	return instances
 }
 
 func SendCloudWatchMetric(count float64) {
