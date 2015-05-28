@@ -14,13 +14,13 @@ import (
 	"time"
 )
 
-type RedisInstance struct {
+type redisInstance struct {
 	Name       string
 	Connection *redis.Client
 }
 
-type RedisCloudWatchMonitor struct {
-	Instances  []*RedisInstance
+type redisCloudWatchMonitor struct {
+	Instances  []*redisInstance
 	TotalCount int64
 }
 
@@ -29,27 +29,27 @@ const (
 )
 
 var (
-	to_cloudwatch          = kingpin.Flag("aws-cloudwatch", "Send metrics to cloud watch").Short('c').Bool()
-	use_iam                = kingpin.Flag("aws-iam-profile", "Use AWSIAM Profile for authentication").Short('i').Bool()
-	aws_region             = kingpin.Flag("aws-region", "AWS Region").Short('R').Default("us-east-1").String()
-	aws_credential_file    = kingpin.Flag("aws-credential-file", "aws credential file, can be used in place of ENV variables or IAM profile").String()
-	aws_credential_profile = kingpin.Flag("aws-credential-profile", "aws credential profile").String()
-	metric_name            = kingpin.Flag("metric-name", "Cloudwatch metric name").Default("redis-queue-size").OverrideDefaultFromEnvar("CLOUDWATCH_METRIC_NAME").Short('m').String()
-	metric_namespace       = kingpin.Flag("metric-namespace", "Cloudwatch metric namespace.").Default("Tropo Logstash ASG").OverrideDefaultFromEnvar("CLOUDWATCH_NAMESPACE").Short('n').String()
-	redis_list_name        = kingpin.Flag("redis-list", "Redis list name").Short('l').Default("logstash").String()
-	redis_servers          = kingpin.Flag("redis-server", "Redis server URI").Short('r').Strings()
-	redis_database         = kingpin.Flag("redis-db", "Redis db name.").Short('d').Int()
-	redis_password         = kingpin.Flag("redis-password", "password for redis instance").Short('p').String()
-	verbose                = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
-	get_version            = kingpin.Flag("version", "get version").Short('V').Bool()
-	auth                   *aws.Config
-	cred                   *credentials.Credentials
+	toCloudwatch         = kingpin.Flag("aws-cloudwatch", "Send metrics to cloud watch").Short('c').Bool()
+	useIam               = kingpin.Flag("aws-iam-profile", "Use AWSIAM Profile for authentication").Short('i').Bool()
+	awsRegion            = kingpin.Flag("aws-region", "AWS Region").Short('R').Default("us-east-1").String()
+	awsCredentialFile    = kingpin.Flag("aws-credential-file", "aws credential file, can be used in place of ENV variables or IAM profile").String()
+	awsCredentialProfile = kingpin.Flag("aws-credential-profile", "aws credential profile").String()
+	metricName           = kingpin.Flag("metric-name", "Cloudwatch metric name").Default("redis-queue-size").OverrideDefaultFromEnvar("CLOUDWATCH_METRIC_NAME").Short('m').String()
+	metricNamespace      = kingpin.Flag("metric-namespace", "Cloudwatch metric namespace.").Default("Tropo Logstash ASG").OverrideDefaultFromEnvar("CLOUDWATCH_NAMESPACE").Short('n').String()
+	redisListName        = kingpin.Flag("redis-list", "Redis list name").Short('l').Default("logstash").String()
+	redisServers         = kingpin.Flag("redis-server", "Redis server URI").Short('r').Strings()
+	redisDatabase        = kingpin.Flag("redis-db", "Redis db name.").Short('d').Int()
+	redisPassword        = kingpin.Flag("redis-password", "password for redis instance").Short('p').String()
+	verbose              = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
+	getVersion           = kingpin.Flag("version", "get version").Short('V').Bool()
+	auth                 *aws.Config
+	cred                 *credentials.Credentials
 )
 
 func init() {
 	kingpin.Parse()
 
-	if *get_version {
+	if *getVersion {
 		fmt.Printf("Version: %s\n", version)
 		os.Exit(0)
 	}
@@ -58,10 +58,10 @@ func init() {
 	cred = credentials.NewChainCredentials(
 		[]credentials.Provider{
 			&credentials.EnvProvider{},
-			&credentials.SharedCredentialsProvider{Filename: *aws_credential_file, Profile: *aws_credential_profile},
+			&credentials.SharedCredentialsProvider{Filename: *awsCredentialFile, Profile: *awsCredentialProfile},
 			&credentials.EC2RoleProvider{},
 		})
-	auth = &aws.Config{Region: *aws_region, Credentials: cred}
+	auth = &aws.Config{Region: *awsRegion, Credentials: cred}
 
 	logrus.SetOutput(os.Stderr)
 	if *verbose {
@@ -71,7 +71,7 @@ func init() {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
 
-	if len(*redis_servers) == 0 {
+	if len(*redisServers) == 0 {
 		logrus.Fatal("You must specify at least one redis server")
 	}
 }
@@ -79,55 +79,55 @@ func init() {
 func main() {
 	logrus.Debug("Starting application")
 
-	app := &RedisCloudWatchMonitor{
+	app := &redisCloudWatchMonitor{
 		TotalCount: 0,
 	}
 
-	app.Instances = GetRedisWatcherInstances()
+	app.Instances = getRedisWatcherInstances()
 
-	GetTotalRedisSetLength(app)
+	getTotalRedisSetLength(app)
 
 	logrus.WithFields(logrus.Fields{
 		"redis_total": app.TotalCount,
 	}).Info("counters")
 
-	if *to_cloudwatch {
-		SendCloudWatchMetric(float64(app.TotalCount))
+	if *toCloudwatch {
+		sendCloudWatchMetric(float64(app.TotalCount))
 	}
 
 	logrus.Debug("Done")
 }
 
-// Iterate over each redis instance and sum the set size for cloud watch
-func GetTotalRedisSetLength(ri *RedisCloudWatchMonitor) {
+// GetTotalRedisSetLength - Iterate over each redis instance and sum the set size for cloud watch
+func getTotalRedisSetLength(ri *redisCloudWatchMonitor) {
 
 	for _, r := range ri.Instances {
 		logrus.Debugf("Looking queue length from %s", r.Name)
-		ls_length, err := r.Connection.LLen(*redis_list_name).Result()
+		lsLength, err := r.Connection.LLen(*redisListName).Result()
 		if err != nil {
 			logrus.Fatal(err)
 		}
-		logrus.Debugf("length of set '%s' was %d on '%s'", *redis_list_name, ls_length, r.Name)
-		ri.TotalCount = ri.TotalCount + ls_length
+		logrus.Debugf("length of set '%s' was %d on '%s'", *redisListName, lsLength, r.Name)
+		ri.TotalCount = ri.TotalCount + lsLength
 	}
 }
 
-// Initilize our structs with passed in redis URL's
-func GetRedisWatcherInstances() []*RedisInstance {
-	var instances []*RedisInstance
+// GetRedisWatcherInstances - Initilize our structs with passed in redis URL's
+func getRedisWatcherInstances() []*redisInstance {
+	var instances []*redisInstance
 
-	for _, v := range *redis_servers {
+	for _, v := range *redisServers {
 
-		redis_instance := &RedisInstance{
+		redisInstance := &redisInstance{
 			Name: v,
 			Connection: redis.NewClient(&redis.Options{
 				Addr:     v,
-				Password: *redis_password,
-				DB:       int64(*redis_database),
+				Password: *redisPassword,
+				DB:       int64(*redisDatabase),
 			}),
 		}
 
-		_, err := redis_instance.Connection.Ping().Result()
+		_, err := redisInstance.Connection.Ping().Result()
 		if err != nil {
 			if err.Error() == "NOAUTH Authentication required." {
 				logrus.Fatal("Password required")
@@ -136,25 +136,25 @@ func GetRedisWatcherInstances() []*RedisInstance {
 			}
 		}
 
-		instances = append(instances, redis_instance)
+		instances = append(instances, redisInstance)
 	}
 	return instances
 }
 
-func SendCloudWatchMetric(count float64) {
+func sendCloudWatchMetric(count float64) {
 
 	svc := cloudwatch.New(auth)
 
 	params := &cloudwatch.PutMetricDataInput{
 		MetricData: []*cloudwatch.MetricDatum{
 			&cloudwatch.MetricDatum{
-				MetricName: aws.String(*metric_name),
+				MetricName: aws.String(*metricName),
 				Timestamp:  aws.Time(time.Now()),
 				Unit:       aws.String("Count"),
 				Value:      aws.Double(count),
 			},
 		},
-		Namespace: aws.String(*metric_namespace),
+		Namespace: aws.String(*metricNamespace),
 	}
 	resp, err := svc.PutMetricData(params)
 
