@@ -5,27 +5,8 @@ import (
 	logrus "github.com/Sirupsen/logrus"
 	"github.com/alecthomas/kingpin"
 	"github.com/awslabs/aws-sdk-go/aws"
-	"github.com/awslabs/aws-sdk-go/aws/awserr"
-	"github.com/awslabs/aws-sdk-go/aws/awsutil"
 	"github.com/awslabs/aws-sdk-go/aws/credentials"
-	"github.com/awslabs/aws-sdk-go/service/cloudwatch"
-	"gopkg.in/redis.v3"
 	"os"
-	"time"
-)
-
-type redisInstance struct {
-	Name       string
-	Connection *redis.Client
-}
-
-type redisCloudWatchMonitor struct {
-	Instances  []*redisInstance
-	TotalCount int64
-}
-
-const (
-	version = "0.0.1"
 )
 
 var (
@@ -96,85 +77,4 @@ func main() {
 	}
 
 	logrus.Debug("Done")
-}
-
-// GetTotalRedisSetLength - Iterate over each redis instance and sum the set size for cloud watch
-func getTotalRedisSetLength(ri *redisCloudWatchMonitor) {
-
-	for _, r := range ri.Instances {
-		logrus.Debugf("Looking queue length from %s", r.Name)
-		lsLength, err := r.Connection.LLen(*redisListName).Result()
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		logrus.Debugf("length of set '%s' was %d on '%s'", *redisListName, lsLength, r.Name)
-		ri.TotalCount = ri.TotalCount + lsLength
-	}
-}
-
-// GetRedisWatcherInstances - Initilize our structs with passed in redis URL's
-func getRedisWatcherInstances() []*redisInstance {
-	var instances []*redisInstance
-
-	for _, v := range *redisServers {
-
-		redisInstance := &redisInstance{
-			Name: v,
-			Connection: redis.NewClient(&redis.Options{
-				Addr:     v,
-				Password: *redisPassword,
-				DB:       int64(*redisDatabase),
-			}),
-		}
-
-		_, err := redisInstance.Connection.Ping().Result()
-		if err != nil {
-			if err.Error() == "NOAUTH Authentication required." {
-				logrus.Fatal("Password required")
-			} else {
-				logrus.Fatal(err)
-			}
-		}
-
-		instances = append(instances, redisInstance)
-	}
-	return instances
-}
-
-func sendCloudWatchMetric(count float64) {
-
-	svc := cloudwatch.New(auth)
-
-	params := &cloudwatch.PutMetricDataInput{
-		MetricData: []*cloudwatch.MetricDatum{
-			&cloudwatch.MetricDatum{
-				MetricName: aws.String(*metricName),
-				Timestamp:  aws.Time(time.Now()),
-				Unit:       aws.String("Count"),
-				Value:      aws.Double(count),
-			},
-		},
-		Namespace: aws.String(*metricNamespace),
-	}
-	resp, err := svc.PutMetricData(params)
-
-	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok {
-			// Generic AWS Error with Code, Message, and original error (if any)
-			logrus.Error(awsErr.Code(), awsErr.Message(), awsErr.OrigErr())
-			if reqErr, ok := err.(awserr.RequestFailure); ok {
-				// A service error occurred
-				logrus.Error(reqErr.Code(), reqErr.Message(), reqErr.StatusCode(), reqErr.RequestID())
-			}
-		} else {
-			// This case should never be hit, The SDK should alwsy return an
-			// error which satisfies the awserr.Error interface.
-
-			logrus.Error(err.Error())
-		}
-	}
-
-	// Pretty-print the response data.
-	logrus.Debug(awsutil.StringValue(resp))
-
 }
