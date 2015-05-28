@@ -9,19 +9,19 @@ import (
 	"github.com/awslabs/aws-sdk-go/aws/awsutil"
 	"github.com/awslabs/aws-sdk-go/aws/credentials"
 	"github.com/awslabs/aws-sdk-go/service/cloudwatch"
-	"github.com/hoisie/redis"
+	"gopkg.in/redis.v3"
 	"os"
 	"time"
 )
 
 type RedisInstance struct {
 	Name       string
-	Connection redis.Client
+	Connection *redis.Client
 }
 
 type RedisCloudWatchMonitor struct {
 	Instances  []*RedisInstance
-	TotalCount int
+	TotalCount int64
 }
 
 const (
@@ -29,17 +29,18 @@ const (
 )
 
 var (
-	to_cloudwatch          = kingpin.Flag("push-metrics", "Send metrics to cloud watch").Short('c').Bool()
-	use_iam                = kingpin.Flag("use-iam", "Use IAM Profile for authentication").Short('i').Bool()
-	verbose                = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
+	to_cloudwatch          = kingpin.Flag("aws-cloudwatch", "Send metrics to cloud watch").Short('c').Bool()
+	use_iam                = kingpin.Flag("aws-iam-profile", "Use AWSIAM Profile for authentication").Short('i').Bool()
+	aws_region             = kingpin.Flag("aws-region", "AWS Region").Short('R').Default("us-east-1").String()
+	aws_credential_file    = kingpin.Flag("aws-credential-file", "aws credential file, can be used in place of ENV variables or IAM profile").String()
+	aws_credential_profile = kingpin.Flag("aws-credential-profile", "aws credential profile").String()
 	metric_name            = kingpin.Flag("metric-name", "Cloudwatch metric name").Default("redis-queue-size").OverrideDefaultFromEnvar("CLOUDWATCH_METRIC_NAME").Short('m').String()
 	metric_namespace       = kingpin.Flag("metric-namespace", "Cloudwatch metric namespace.").Default("Tropo Logstash ASG").OverrideDefaultFromEnvar("CLOUDWATCH_NAMESPACE").Short('n').String()
-	aws_region             = kingpin.Flag("region", "AWS Region").Default("us-east-1").String()
-	redis_list_name        = kingpin.Flag("redis-db", "Redis db").Short('r').Default("logstash").String()
-	redis_servers          = kingpin.Flag("redis-servers", "Redis server.").Short('s').Strings()
-	redis_password         = kingpin.Flag("redis-password", "password for redis instance").Short('P').String()
-	aws_credential_file    = kingpin.Flag("aws-credential-file", "aws credential file, can be used in place of ENV variables or IAM profile").Short('f').String()
-	aws_credential_profile = kingpin.Flag("aws-credential-profile", "aws credential profile").Short('p').String()
+	redis_list_name        = kingpin.Flag("redis-list", "Redis list name").Short('l').Default("logstash").String()
+	redis_servers          = kingpin.Flag("redis-server", "Redis server URI").Short('r').Strings()
+	redis_database         = kingpin.Flag("redis-db", "Redis db name.").Short('d').Int()
+	redis_password         = kingpin.Flag("redis-password", "password for redis instance").Short('p').String()
+	verbose                = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
 	get_version            = kingpin.Flag("version", "get version").Short('V').Bool()
 	auth                   *aws.Config
 	cred                   *credentials.Credentials
@@ -102,7 +103,7 @@ func GetTotalRedisSetLength(ri *RedisCloudWatchMonitor) {
 
 	for _, r := range ri.Instances {
 		logrus.Debugf("Looking queue length from %s", r.Name)
-		ls_length, err := r.Connection.Llen(*redis_list_name)
+		ls_length, err := r.Connection.LLen(*redis_list_name).Result()
 		if err != nil {
 			logrus.Fatal(err)
 		}
@@ -116,16 +117,23 @@ func GetRedisWatcherInstances() []*RedisInstance {
 	var instances []*RedisInstance
 
 	for _, v := range *redis_servers {
+
 		redis_instance := &RedisInstance{
 			Name: v,
-			Connection: redis.Client{
-				Addr: v,
-			},
+			Connection: redis.NewClient(&redis.Options{
+				Addr:     v,
+				Password: *redis_password,
+				DB:       int64(*redis_database),
+			}),
 		}
 
-		// if password provided we'll use it
-		if *redis_password != "" {
-			redis_instance.Connection.Password = *redis_password
+		_, err := redis_instance.Connection.Ping().Result()
+		if err != nil {
+			if err.Error() == "NOAUTH Authentication required." {
+				logrus.Fatal("Password required")
+			} else {
+				logrus.Fatal(err)
+			}
 		}
 
 		instances = append(instances, redis_instance)
