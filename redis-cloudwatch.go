@@ -16,7 +16,7 @@ var (
 	awsCredentialFile    = kingpin.Flag("aws-credential-file", "aws credential file, can be used in place of ENV variables or IAM profile").String()
 	awsCredentialProfile = kingpin.Flag("aws-credential-profile", "aws credential profile").String()
 	metricName           = kingpin.Flag("metric-name", "Cloudwatch metric name").Default("redis-queue-size").OverrideDefaultFromEnvar("CLOUDWATCH_METRIC_NAME").Short('m').String()
-	metricNamespace      = kingpin.Flag("metric-namespace", "Cloudwatch metric namespace.").Default("Tropo Logstash ASG").OverrideDefaultFromEnvar("CLOUDWATCH_NAMESPACE").Short('n').String()
+	metricNamespace      = kingpin.Flag("metric-namespace", "Cloudwatch metric namespace.").Default("Logstash ASG").OverrideDefaultFromEnvar("CLOUDWATCH_NAMESPACE").Short('n').String()
 	redisListName        = kingpin.Flag("redis-list", "Redis list name").Short('l').Default("logstash").String()
 	redisServers         = kingpin.Flag("redis-server", "Redis server URI").Short('r').Strings()
 	redisDatabase        = kingpin.Flag("redis-db", "Redis db name.").Short('d').Int()
