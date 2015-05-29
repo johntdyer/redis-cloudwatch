@@ -23,7 +23,8 @@ all: build
 
 build: vet
 		echo "==> Build package ...";
-		$(GO_BUILD) redis-cloudwatch.go redis.go version.go cloud_watch.go redis-cloudwatch.go structs.go || exit 1;
+		$(GO_BUILD)  -o bin/redis-cloudwatch.osx redis-cloudwatch.go redis.go version.go cloud_watch.go structs.go || exit 1;
+		GOOS=linux GOARCH=amd64 $(GO_BUILD)  -o bin/redis-cloudwatch.linux redis-cloudwatch.go redis.go version.go cloud_watch.go structs.go || exit 1;
 
 build-race: vet
 
