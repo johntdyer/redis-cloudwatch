@@ -7,6 +7,9 @@ import (
 	"github.com/awslabs/aws-sdk-go/aws"
 	"github.com/awslabs/aws-sdk-go/aws/credentials"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 var (
@@ -15,11 +18,13 @@ var (
 	awsRegion            = kingpin.Flag("aws-region", "AWS Region").Short('R').Default("us-east-1").String()
 	awsCredentialFile    = kingpin.Flag("aws-credential-file", "aws credential file, can be used in place of ENV variables or IAM profile").String()
 	awsCredentialProfile = kingpin.Flag("aws-credential-profile", "aws credential profile").String()
+	applicationLockFile  = kingpin.Flag("lock-file", "lock file, insures only a single instance is running").Default("/tmp/redis-cloudwatch.lock").String()
 	metricName           = kingpin.Flag("metric-name", "Cloudwatch metric name").Default("redis-queue-size").OverrideDefaultFromEnvar("CLOUDWATCH_METRIC_NAME").Short('m').String()
 	metricNamespace      = kingpin.Flag("metric-namespace", "Cloudwatch metric namespace.").Default("Logstash ASG").OverrideDefaultFromEnvar("CLOUDWATCH_NAMESPACE").Short('n').String()
 	redisListName        = kingpin.Flag("redis-list", "Redis list name").Short('l').Default("logstash").String()
 	redisServers         = kingpin.Flag("redis-server", "Redis server URI").Short('r').Strings()
 	redisDatabase        = kingpin.Flag("redis-db", "Redis db name.").Short('d').Int()
+	sleepTime            = kingpin.Flag("sleep-time", "How long to sleep between each check.  Defaults to 0 which checks once and exits.").Short('s').Duration()
 	redisPassword        = kingpin.Flag("redis-password", "password for redis instance").Short('p').String()
 	verbose              = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
 	getVersion           = kingpin.Flag("version", "get version").Short('V').Bool()
@@ -58,23 +63,48 @@ func init() {
 }
 
 func main() {
-	logrus.Debug("Starting application")
+	lock := checkLockFile()
+	defer lock.Unlock()
 
-	app := &redisCloudWatchMonitor{
-		TotalCount: 0,
+	// startup log
+	logrus.WithFields(startUpLoggingFields()).Info("Staring application")
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, syscall.SIGTERM)
+	go func() {
+		<-c
+		cleanup()
+		os.Exit(0)
+	}()
+
+	// loop
+	for {
+
+		app := &redisCloudWatchMonitor{
+			TotalCount: 0,
+		}
+
+		app.Instances = getRedisWatcherInstances()
+
+		getTotalRedisSetLength(app)
+
+		logrus.WithFields(logrus.Fields{
+			"redis_total": app.TotalCount,
+		}).Info("counters")
+
+		if *toCloudwatch {
+			sendCloudWatchMetric(float64(app.TotalCount))
+		}
+
+		// If there is no sleeptime set then we break
+		if *sleepTime == 0 {
+			break
+		} else {
+			logrus.Debugf("Sleeping for for %s", *sleepTime)
+			time.Sleep(*sleepTime)
+		}
+
 	}
 
-	app.Instances = getRedisWatcherInstances()
-
-	getTotalRedisSetLength(app)
-
-	logrus.WithFields(logrus.Fields{
-		"redis_total": app.TotalCount,
-	}).Info("counters")
-
-	if *toCloudwatch {
-		sendCloudWatchMetric(float64(app.TotalCount))
-	}
-
-	logrus.Debug("Done")
 }
